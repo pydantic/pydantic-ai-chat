@@ -49,7 +49,7 @@ class Person(BaseModel):
 
 
 agent = Agent(
-    'anthropic:claude-sonnet-4-0',
+    'openai:gpt-4.1',
     # output_type=Person,
 )
 
@@ -73,6 +73,8 @@ async def text_response(message_id: str, text: str) -> AsyncIterable[ai.UIMessag
 async def sse_messages(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> AsyncIterable[str]:
     async for message in messages_stream:
         yield message.model_dump_json(exclude_none=True, by_alias=True)
+    # this doesn't seem to be necessary, but the next js app sends it
+    yield '[DONE]'
 
 
 def response(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> EventSourceResponse:
@@ -183,11 +185,9 @@ async def chat_endpoint(request: Request) -> Response:
         await send(ai.FinishChunk())
 
     async def run_agent():
-        print('running agent')
         try:
             await agent.run('\n'.join(prompt), event_stream_handler=event_stream_handler)
-            # async with agent.run_stream() as response:
-            # await response.get_output()
+            send_stream.close()
         except Exception as e:
             print(f'Error: {e}')
             raise
@@ -195,12 +195,14 @@ async def chat_endpoint(request: Request) -> Response:
     task = asyncio.create_task(run_agent())
 
     async def complete_task():
-        print('completed task')
         try:
             await task
         except asyncio.CancelledError:
             pass
-        print('completed task')
+        except Exception as e:
+            # TODO logfire
+            print(f'Error running agent: {e}')
+            raise
 
     return EventSourceResponse(
         sse_messages(receive_stream),
