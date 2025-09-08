@@ -118,3 +118,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* for streamdown markdown content, background color should work for both light and dark content */
+.code-bg .bg-muted {
+  background: #b0b8c442;
+}
+.rounded {
+  border-radius: 4px;
+}

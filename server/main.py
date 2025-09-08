@@ -11,7 +11,6 @@ from pydantic.alias_generators import to_camel
 from pydantic_ai import Agent, RunContext, messages as msgs
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
-from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -59,51 +58,8 @@ def get_lat_lon(location: str) -> dict[str, float]:
     return {'lat': 52.5200, 'lon': 13.4050}
 
 
-async def text_response(message_id: str, text: str) -> AsyncIterable[ai.UIMessageChunk]:
-    yield ai.StartChunk()
-
-    yield ai.StartStepChunk()
-    yield ai.ReasoningStartChunk(id=message_id)
-    yield ai.ReasoningDeltaChunk(id=message_id, delta=text)
-    yield ai.FinishStepChunk()
-
-    yield ai.FinishChunk()
-
-
-async def sse_messages(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> AsyncIterable[str]:
-    async for message in messages_stream:
-        yield message.model_dump_json(exclude_none=True, by_alias=True)
-    # this doesn't seem to be necessary, but the next js app sends it
-    yield '[DONE]'
-
-
-def response(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> EventSourceResponse:
-    return EventSourceResponse(
-        sse_messages(messages_stream),
-        headers={'x-vercel-ai-ui-message-stream': 'v1'},
-    )
-
-
-async def chat_endpoint(request: Request) -> Response:
-    body = await request.body()
-    try:
-        data = request_data_schema.validate_json(body)
-    except ValidationError as e:
-        debug(e)
-        return JSONResponse({'errors': e.errors()}, status_code=422)
-
+async def chat_stream(user_prompt: str):
     message_id = uuid4().hex
-    if not data.messages:
-        return response(text_response(message_id, 'Error: no messages provided'))
-
-    message = data.messages[-1]
-    prompt: list[str] = []
-    for part in message.parts:
-        if isinstance(part, ai.TextUIPart):
-            prompt.append(part.text)
-        else:
-            return response(text_response(message_id, 'Error: only text parts are supported yet'))
-
     send_stream, receive_stream = create_memory_object_stream[ai.UIMessageChunk]()
 
     async def send(chunk: ai.UIMessageChunk):
@@ -185,29 +141,65 @@ async def chat_endpoint(request: Request) -> Response:
         await send(ai.FinishChunk())
 
     async def run_agent():
-        try:
-            await agent.run('\n'.join(prompt), event_stream_handler=event_stream_handler)
-            send_stream.close()
-        except Exception as e:
-            print(f'Error: {e}')
-            raise
+        await agent.run(user_prompt, event_stream_handler=event_stream_handler)
+        send_stream.close()
 
     task = asyncio.create_task(run_agent())
 
-    async def complete_task():
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            # TODO logfire
-            print(f'Error running agent: {e}')
-            raise
+    async for message in receive_stream:
+        yield message
+
+    await task
+
+
+async def text_response(message_id: str, text: str) -> AsyncIterable[ai.UIMessageChunk]:
+    yield ai.StartChunk()
+
+    yield ai.StartStepChunk()
+    yield ai.ReasoningStartChunk(id=message_id)
+    yield ai.ReasoningDeltaChunk(id=message_id, delta=text)
+    yield ai.FinishStepChunk()
+
+    yield ai.FinishChunk()
+
+
+async def sse_messages(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> AsyncIterable[str]:
+    async for message in messages_stream:
+        yield message.model_dump_json(exclude_none=True, by_alias=True)
+    # this doesn't seem to be necessary, but the next js app sends it
+    yield '[DONE]'
+
+
+def response(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> EventSourceResponse:
+    return EventSourceResponse(
+        sse_messages(messages_stream),
+        headers={'x-vercel-ai-ui-message-stream': 'v1'},
+    )
+
+
+async def chat_endpoint(request: Request) -> Response:
+    body = await request.body()
+    try:
+        data = request_data_schema.validate_json(body)
+    except ValidationError as e:
+        debug(e)
+        return JSONResponse({'errors': e.errors()}, status_code=422)
+
+    message_id = uuid4().hex
+    if not data.messages:
+        return response(text_response(message_id, 'Error: no messages provided'))
+
+    message = data.messages[-1]
+    prompt: list[str] = []
+    for part in message.parts:
+        if isinstance(part, ai.TextUIPart):
+            prompt.append(part.text)
+        else:
+            return response(text_response(message_id, 'Error: only text parts are supported yet'))
 
     return EventSourceResponse(
-        sse_messages(receive_stream),
+        sse_messages(chat_stream('\n'.join(prompt))),
         headers={'x-vercel-ai-ui-message-stream': 'v1'},
-        background=BackgroundTask(complete_task),
     )
 
 
