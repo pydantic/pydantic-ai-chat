@@ -12,14 +12,6 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
-  "prettier": {
-    "singleQuote": true,
-    "semi": false,
-    "trailingComma": "all",
-    "tabWidth": 2,
-    "printWidth": 119,
-    "bracketSpacing": true
-  },
   "dependencies": {
     "@ai-sdk/react": "^2.0.34",
     "@radix-ui/react-avatar": "^1.1.10",

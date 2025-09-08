@@ -5,6 +5,7 @@ from uuid import uuid4
 from devtools import debug
 from pydantic import BaseModel, Discriminator, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
+from pydantic_ai import Agent
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -35,10 +36,23 @@ request_data_schema: TypeAdapter[SubmitMessage | RegenerateMessage] = TypeAdapte
 )
 
 
+agent = Agent('openai:gpt-4.1')
+
+
 async def message_generator() -> AsyncIterable[ai.UIMessageChunk]:
     message_id = uuid4().hex
 
     yield ai.StartChunk()
+
+    yield ai.StartStepChunk()
+    yield ai.ReasoningStartChunk(id=message_id, provider_metadata={'openai': {'itemId': message_id}})
+    yield ai.ReasoningDeltaChunk(id=message_id, delta='What ')
+    yield ai.ReasoningDeltaChunk(id=message_id, delta='about ')
+    yield ai.ReasoningDeltaChunk(id=message_id, delta='this.')
+    yield ai.ReasoningDeltaChunk(id=message_id, delta=message_id)
+    yield ai.ReasoningEndChunk(id=message_id)
+    yield ai.FinishStepChunk()
+
     yield ai.StartStepChunk()
     yield ai.TextStartChunk(id=message_id, provider_metadata={'openai': {'itemId': message_id}})
     yield ai.TextDeltaChunk(id=message_id, delta='Hi')
@@ -55,6 +69,14 @@ async def message_generator() -> AsyncIterable[ai.UIMessageChunk]:
     yield ai.TextDeltaChunk(id=message_id, delta=message_id)
     yield ai.TextEndChunk(id=message_id)
     yield ai.FinishStepChunk()
+
+    yield ai.StartStepChunk()
+    yield ai.ToolInputStartChunk(tool_call_id='tool123', tool_name='foobar')
+    yield ai.ToolInputDeltaChunk(tool_call_id='tool123', input_text_delta='{"x": "hello"')
+    yield ai.ToolInputDeltaChunk(tool_call_id='tool123', input_text_delta=', "y": 123}')
+    yield ai.ToolOutputAvailableChunk(tool_call_id='tool123', output={'result': 'foobar'})
+    yield ai.FinishStepChunk()
+
     yield ai.FinishChunk()
 
 

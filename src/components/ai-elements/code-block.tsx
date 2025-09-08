@@ -16,7 +16,8 @@ const CodeBlockContext = createContext<CodeBlockContextType>({
 
 export type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string
-  language: string
+  // TODO add any more languages we want here
+  language: 'json'
   showLineNumbers?: boolean
   children?: ReactNode
 }

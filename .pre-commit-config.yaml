@@ -1,0 +1,39 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # - id: no-commit-to-branch # prevent direct commits to the `main` branch
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/codespell-project/codespell
+    # Configuration for codespell is in pyproject.toml
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+
+  - repo: local
+    hooks:
+      - id: format
+        name: format
+        entry: npm
+        args: [run, format]
+        language: system
+        types_or: [javascript, ts, json]
+        pass_filenames: false
+      - id: lint-fix
+        name: lint fix
+        entry: npm
+        args: [run, lint-fix]
+        language: system
+        types_or: [javascript, ts, json]
+        pass_filenames: false
+      - id: typecheck
+        name: typecheck
+        entry: npm
+        args: [run, typecheck]
+        language: system
+        types_or: [javascript, ts]
+        pass_filenames: false
