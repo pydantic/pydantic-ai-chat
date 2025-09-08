@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.10.0",
     "devtools>=0.12.2",
     "pydantic>=2.11.7",
     "pydantic-ai>=1.0.1",

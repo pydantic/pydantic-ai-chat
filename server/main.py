@@ -1,13 +1,17 @@
 import asyncio
+import json
+from datetime import date
 from typing import Annotated, AsyncIterable, Literal
 from uuid import uuid4
 
+from anyio import create_memory_object_stream
 from devtools import debug
 from pydantic import BaseModel, Discriminator, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext, messages as msgs
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -36,45 +40,31 @@ request_data_schema: TypeAdapter[SubmitMessage | RegenerateMessage] = TypeAdapte
 )
 
 
-agent = Agent('openai:gpt-4.1')
+class Person(BaseModel):
+    name: str
+    age: int
+    dob: date
+    lat: float
+    lon: float
 
 
-async def message_generator() -> AsyncIterable[ai.UIMessageChunk]:
-    message_id = uuid4().hex
+agent = Agent(
+    'anthropic:claude-sonnet-4-0',
+    # output_type=Person,
+)
 
+
+@agent.tool_plain
+def get_lat_lon(location: str) -> dict[str, float]:
+    return {'lat': 52.5200, 'lon': 13.4050}
+
+
+async def text_response(message_id: str, text: str) -> AsyncIterable[ai.UIMessageChunk]:
     yield ai.StartChunk()
 
     yield ai.StartStepChunk()
-    yield ai.ReasoningStartChunk(id=message_id, provider_metadata={'openai': {'itemId': message_id}})
-    yield ai.ReasoningDeltaChunk(id=message_id, delta='What ')
-    yield ai.ReasoningDeltaChunk(id=message_id, delta='about ')
-    yield ai.ReasoningDeltaChunk(id=message_id, delta='this.')
-    yield ai.ReasoningDeltaChunk(id=message_id, delta=message_id)
-    yield ai.ReasoningEndChunk(id=message_id)
-    yield ai.FinishStepChunk()
-
-    yield ai.StartStepChunk()
-    yield ai.TextStartChunk(id=message_id, provider_metadata={'openai': {'itemId': message_id}})
-    yield ai.TextDeltaChunk(id=message_id, delta='Hi')
-    yield ai.TextDeltaChunk(id=message_id, delta=' again')
-    yield ai.TextDeltaChunk(id=message_id, delta='!')
-    yield ai.TextDeltaChunk(id=message_id, delta=' 😊')
-    yield ai.TextDeltaChunk(id=message_id, delta=' How')
-    yield ai.TextDeltaChunk(id=message_id, delta=' can')
-    yield ai.TextDeltaChunk(id=message_id, delta=' I')
-    yield ai.TextDeltaChunk(id=message_id, delta=' assist')
-    yield ai.TextDeltaChunk(id=message_id, delta=' you')
-    yield ai.TextDeltaChunk(id=message_id, delta=' today')
-    yield ai.TextDeltaChunk(id=message_id, delta='?')
-    yield ai.TextDeltaChunk(id=message_id, delta=message_id)
-    yield ai.TextEndChunk(id=message_id)
-    yield ai.FinishStepChunk()
-
-    yield ai.StartStepChunk()
-    yield ai.ToolInputStartChunk(tool_call_id='tool123', tool_name='foobar')
-    yield ai.ToolInputDeltaChunk(tool_call_id='tool123', input_text_delta='{"x": "hello"')
-    yield ai.ToolInputDeltaChunk(tool_call_id='tool123', input_text_delta=', "y": 123}')
-    yield ai.ToolOutputAvailableChunk(tool_call_id='tool123', output={'result': 'foobar'})
+    yield ai.ReasoningStartChunk(id=message_id)
+    yield ai.ReasoningDeltaChunk(id=message_id, delta=text)
     yield ai.FinishStepChunk()
 
     yield ai.FinishChunk()
@@ -83,21 +73,139 @@ async def message_generator() -> AsyncIterable[ai.UIMessageChunk]:
 async def sse_messages(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> AsyncIterable[str]:
     async for message in messages_stream:
         yield message.model_dump_json(exclude_none=True, by_alias=True)
-        await asyncio.sleep(0.1)
+
+
+def response(messages_stream: AsyncIterable[ai.UIMessageChunk]) -> EventSourceResponse:
+    return EventSourceResponse(
+        sse_messages(messages_stream),
+        headers={'x-vercel-ai-ui-message-stream': 'v1'},
+    )
 
 
 async def chat_endpoint(request: Request) -> Response:
     body = await request.body()
-    print(body)
     try:
         data = request_data_schema.validate_json(body)
     except ValidationError as e:
         debug(e)
         return JSONResponse({'errors': e.errors()}, status_code=422)
-    debug(data)
+
+    message_id = uuid4().hex
+    if not data.messages:
+        return response(text_response(message_id, 'Error: no messages provided'))
+
+    message = data.messages[-1]
+    prompt: list[str] = []
+    for part in message.parts:
+        if isinstance(part, ai.TextUIPart):
+            prompt.append(part.text)
+        else:
+            return response(text_response(message_id, 'Error: only text parts are supported yet'))
+
+    send_stream, receive_stream = create_memory_object_stream[ai.UIMessageChunk]()
+
+    async def send(chunk: ai.UIMessageChunk):
+        await send_stream.send(chunk)
+
+    async def event_stream_handler(_deps: RunContext[None], events: AsyncIterable[msgs.AgentStreamEvent]) -> None:
+        await send(ai.StartChunk())
+        final_result_tool_id: str | None = None
+        async for event in events:
+            match event:
+                case msgs.PartStartEvent(part=part):
+                    match part:
+                        case msgs.TextPart(content=content):
+                            await send(ai.TextStartChunk(id=message_id))
+                            await send(ai.TextDeltaChunk(id=message_id, delta=content))
+                        case (
+                            msgs.ToolCallPart(tool_name=tool_name, tool_call_id=tool_call_id, args=args)
+                            | msgs.BuiltinToolCallPart(tool_name=tool_name, tool_call_id=tool_call_id, args=args)
+                        ):
+                            await send(ai.ToolInputStartChunk(tool_call_id=tool_call_id, tool_name=tool_name))
+                            if isinstance(args, str):
+                                await send(ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=args))
+                            elif args is not None:
+                                await send(
+                                    ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=json.dumps(args))
+                                )
+
+                        case msgs.BuiltinToolReturnPart(
+                            tool_name=tool_name, tool_call_id=tool_call_id, content=content
+                        ):
+                            await send(ai.ToolOutputAvailableChunk(tool_call_id=tool_call_id, output=content))
+
+                        case msgs.ThinkingPart(content=content):
+                            await send(ai.ReasoningStartChunk(id=message_id))
+                            await send(ai.ReasoningDeltaChunk(id=message_id, delta=content))
+
+                case msgs.PartDeltaEvent(delta=delta):
+                    match delta:
+                        case msgs.TextPartDelta(content_delta=content_delta):
+                            await send(ai.TextDeltaChunk(id=message_id, delta=content_delta))
+                        case msgs.ThinkingPartDelta(content_delta=content_delta):
+                            if content_delta:
+                                await send(ai.ReasoningDeltaChunk(id=message_id, delta=content_delta))
+                        case msgs.ToolCallPartDelta(args_delta=args, tool_call_id=tool_call_id):
+                            tool_call_id = tool_call_id or ''
+                            if isinstance(args, str):
+                                await send(ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=args))
+                            elif args is not None:
+                                await send(
+                                    ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=json.dumps(args))
+                                )
+                case msgs.FinalResultEvent(tool_name=tool_name, tool_call_id=tool_call_id):
+                    if tool_call_id and tool_name:
+                        final_result_tool_id = tool_call_id
+                        await send(ai.ToolInputStartChunk(tool_call_id=tool_call_id, tool_name=tool_name))
+                case msgs.FunctionToolCallEvent():
+                    pass
+                    # print(f'TODO FunctionToolCallEvent {part}')
+                case msgs.FunctionToolResultEvent(result=result):
+                    match result:
+                        case msgs.ToolReturnPart(tool_name=tool_name, tool_call_id=tool_call_id, content=content):
+                            await send(ai.ToolOutputAvailableChunk(tool_call_id=tool_call_id, output=content))
+                        case msgs.RetryPromptPart(tool_name=tool_name, tool_call_id=tool_call_id, content=content):
+                            await send(ai.ToolOutputAvailableChunk(tool_call_id=tool_call_id, output=content))
+                case msgs.BuiltinToolCallEvent(part=part):
+                    tool_call_id = part.tool_call_id
+                    tool_name = part.tool_name
+                    args = part.args
+                    await send(ai.ToolInputStartChunk(tool_call_id=tool_call_id, tool_name=tool_name))
+                    if isinstance(args, str):
+                        await send(ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=args))
+                    elif args is not None:
+                        await send(ai.ToolInputDeltaChunk(tool_call_id=tool_call_id, input_text_delta=json.dumps(args)))
+                case msgs.BuiltinToolResultEvent(result=result):
+                    await send(ai.ToolOutputAvailableChunk(tool_call_id=result.tool_call_id, output=result.content))
+
+        if final_result_tool_id:
+            await send(ai.ToolOutputAvailableChunk(tool_call_id=final_result_tool_id, output=None))
+        await send(ai.FinishChunk())
+
+    async def run_agent():
+        print('running agent')
+        try:
+            await agent.run('\n'.join(prompt), event_stream_handler=event_stream_handler)
+            # async with agent.run_stream() as response:
+            # await response.get_output()
+        except Exception as e:
+            print(f'Error: {e}')
+            raise
+
+    task = asyncio.create_task(run_agent())
+
+    async def complete_task():
+        print('completed task')
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        print('completed task')
+
     return EventSourceResponse(
-        sse_messages(message_generator()),
+        sse_messages(receive_stream),
         headers={'x-vercel-ai-ui-message-stream': 'v1'},
+        background=BackgroundTask(complete_task),
     )
 
 
