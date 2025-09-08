@@ -44,6 +44,6 @@ export type MessageAvatarProps = ComponentProps<typeof Avatar> & {
 export const MessageAvatar = ({ src, name, className, ...props }: MessageAvatarProps) => (
   <Avatar className={cn('size-8 ring-1 ring-border', className)} {...props}>
     <AvatarImage alt="" className="mt-0 mb-0" src={src} />
-    <AvatarFallback>{name?.slice(0, 2) || 'ME'}</AvatarFallback>
+    <AvatarFallback>{name?.slice(0, 2) ?? 'ME'}</AvatarFallback>
   </Avatar>
 )

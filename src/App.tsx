@@ -14,7 +14,7 @@ import {
   PromptInputTools,
 } from '@/components/ai-elements/prompt-input'
 import { Actions, Action } from '@/components/ai-elements/actions'
-import { Fragment, useState } from 'react'
+import { Fragment, useState, type FormEvent } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { Response } from '@/components/ai-elements/response'
 import { CopyIcon, GlobeIcon, RefreshCcwIcon } from 'lucide-react'
@@ -39,7 +39,7 @@ const ChatBotDemo = () => {
   const [webSearch, setWebSearch] = useState(false)
   const { messages, sendMessage, status, regenerate } = useChat()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (input.trim()) {
       sendMessage(
@@ -47,9 +47,23 @@ const ChatBotDemo = () => {
         {
           body: { model, webSearch },
         },
-      )
+      ).catch((error: unknown) => {
+        console.error('Error sending message:', error)
+      })
       setInput('')
     }
+  }
+
+  function regen(messageId: string) {
+    regenerate({ messageId }).catch((error: unknown) => {
+      console.error('Error regenerating message:', error)
+    })
+  }
+
+  function copy(text: string) {
+    navigator.clipboard.writeText(text).catch((error: unknown) => {
+      console.error('Error copying text:', error)
+    })
   }
 
   return (
@@ -84,10 +98,20 @@ const ChatBotDemo = () => {
                           </Message>
                           {message.role === 'assistant' && (
                             <Actions className="mt-2">
-                              <Action onClick={() => regenerate({ messageId: message.id })} label="Retry">
+                              <Action
+                                onClick={() => {
+                                  regen(message.id)
+                                }}
+                                label="Retry"
+                              >
                                 <RefreshCcwIcon className="size-3" />
                               </Action>
-                              <Action onClick={() => navigator.clipboard.writeText(part.text)} label="Copy">
+                              <Action
+                                onClick={() => {
+                                  copy(part.text)
+                                }}
+                                label="Copy"
+                              >
                                 <CopyIcon className="size-3" />
                               </Action>
                             </Actions>
@@ -121,10 +145,20 @@ const ChatBotDemo = () => {
         </Conversation>
 
         <PromptInput onSubmit={handleSubmit} className="mt-4">
-          <PromptInputTextarea onChange={(e) => setInput(e.target.value)} value={input} />
+          <PromptInputTextarea
+            onChange={(e) => {
+              setInput(e.target.value)
+            }}
+            value={input}
+          />
           <PromptInputToolbar>
             <PromptInputTools>
-              <PromptInputButton variant={webSearch ? 'default' : 'ghost'} onClick={() => setWebSearch(!webSearch)}>
+              <PromptInputButton
+                variant={webSearch ? 'default' : 'ghost'}
+                onClick={() => {
+                  setWebSearch(!webSearch)
+                }}
+              >
                 <GlobeIcon size={16} />
                 <span>Search</span>
               </PromptInputButton>

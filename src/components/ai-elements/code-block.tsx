@@ -6,7 +6,7 @@ import { createContext, useContext, useState } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-type CodeBlockContextType = {
+interface CodeBlockContextType {
   code: string
 }
 
@@ -104,20 +104,25 @@ export const CodeBlockCopyButton = ({
   const [isCopied, setIsCopied] = useState(false)
   const { code } = useContext(CodeBlockContext)
 
-  const copyToClipboard = async () => {
+  const copyToClipboard = () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (typeof window === 'undefined' || !navigator.clipboard.writeText) {
       onError?.(new Error('Clipboard API not available'))
       return
     }
 
-    try {
-      await navigator.clipboard.writeText(code)
-      setIsCopied(true)
-      onCopy?.()
-      setTimeout(() => setIsCopied(false), timeout)
-    } catch (error) {
-      onError?.(error as Error)
-    }
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setIsCopied(true)
+        onCopy?.()
+        setTimeout(() => {
+          setIsCopied(false)
+        }, timeout)
+      })
+      .catch((error: unknown) => {
+        onError?.(error as Error)
+      })
   }
 
   const Icon = isCopied ? CheckIcon : CopyIcon

@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
@@ -7,7 +8,7 @@ import { ChevronDownIcon } from 'lucide-react'
 import type { ComponentProps, ReactNode } from 'react'
 import { createContext, useContext, useState } from 'react'
 
-export type WebPreviewContextValue = {
+export interface WebPreviewContextValue {
   url: string
   setUrl: (url: string) => void
   consoleOpen: boolean
@@ -141,11 +142,11 @@ export const WebPreviewBody = ({ className, loading, src, ...props }: WebPreview
 }
 
 export type WebPreviewConsoleProps = ComponentProps<'div'> & {
-  logs?: Array<{
+  logs?: {
     level: 'log' | 'warn' | 'error'
     message: string
     timestamp: Date
-  }>
+  }[]
 }
 
 export const WebPreviewConsole = ({ className, logs = [], children, ...props }: WebPreviewConsoleProps) => {

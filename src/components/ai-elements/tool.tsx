@@ -12,7 +12,7 @@ export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible className={cn('not-prose mb-4 w-full rounded-md border', className)} {...props} />
 )
 
-export type ToolHeaderProps = {
+export interface ToolHeaderProps {
   type: ToolUIPart['type']
   state: ToolUIPart['state']
   className?: string
