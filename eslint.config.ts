@@ -19,7 +19,7 @@ export default defineConfig(
       globals: globals.node,
     },
   },
-  { ignores: ['dist', 'eslint.config.ts'] },
+  { ignores: ['dist'] },
   {
     rules: {
       '@typescript-eslint/no-unused-vars': [
@@ -51,6 +51,8 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: true,
+        // @ts-expect-error we're in node so this is fine
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         tsconfigRootDir: import.meta.dirname,
       },
     },

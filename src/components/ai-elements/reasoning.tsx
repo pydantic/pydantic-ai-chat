@@ -40,6 +40,7 @@ export const Reasoning = memo(
     isStreaming = false,
     open,
     defaultOpen = true,
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     onOpenChange,
     duration: durationProp,
     children,
