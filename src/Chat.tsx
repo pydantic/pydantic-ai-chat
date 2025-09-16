@@ -22,12 +22,12 @@ import { Part } from './Part'
 
 const models = [
   {
-    name: 'GPT 4o',
-    value: 'openai/gpt-4o',
+    name: 'GPT 4.1',
+    value: 'openai/gpt-4.1',
   },
   {
-    name: 'Deepseek R1',
-    value: 'deepseek/deepseek-r1',
+    name: 'Anthropic Sonnet 4',
+    value: 'anthropic:claude-sonnet-4-0',
   },
 ]
 
